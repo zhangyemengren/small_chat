@@ -21,6 +21,8 @@ fn handle_connection(mut stream: TcpStream) {
         .collect();
     println!("Request: {:#?}", req);
 
-    let response = b"OK\nmessage is ok\n0000\n";
-    stream.write_all(response).unwrap();
+    let mut response = String::new();
+    response = response + req.join("\n").as_str() + "\n0000\n";
+
+    stream.write_all(response.as_bytes()).unwrap();
 }

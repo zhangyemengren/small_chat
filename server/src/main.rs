@@ -1,5 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::thread;
+use std::time::Duration;
 
 fn main() {
     // 监听
@@ -22,7 +24,16 @@ fn handle_connection(mut stream: TcpStream) {
     println!("Request: {:#?}", req);
 
     let mut response = String::new();
-    response = response + req.join("\n").as_str() + "\n0000\n";
-
+    response = response + req.join("\n").as_str() + "\n";
     stream.write_all(response.as_bytes()).unwrap();
+    // 推送消息
+    for x in 1..4 {
+        thread::sleep(Duration::from_secs(1));
+        let response = format!("times {}\n", x);
+        stream.write_all(response.as_bytes()).unwrap();
+    }
+    // 结束链接
+    let end = b"0000\n";
+    stream.write_all(end).unwrap();
+    stream.shutdown(Shutdown::Both).unwrap();
 }

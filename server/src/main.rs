@@ -14,26 +14,36 @@ fn main() {
 }
 // 处理请求 读取并返回
 fn handle_connection(mut stream: TcpStream) {
-    let buf_reader = BufReader::new(&mut stream);
-    // 逐行读取 并定义0000\n为结束符
-    let req: Vec<_> = buf_reader
-        .lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| *line != "0000")
-        .collect();
-    println!("Request: {:#?}", req);
+    let mut buf_reader = BufReader::new(stream.try_clone().unwrap());
 
-    let mut response = String::new();
-    response = response + req.join("\n").as_str() + "\n";
-    stream.write_all(response.as_bytes()).unwrap();
-    // 推送消息
-    for x in 1..4 {
-        thread::sleep(Duration::from_secs(1));
-        let response = format!("times {}\n", x);
-        stream.write_all(response.as_bytes()).unwrap();
+    loop {
+        let mut line = String::new();
+        if let Ok(_) = buf_reader.read_line(&mut line) {
+            if line == "0000\n" {
+                stream.write_all(b"finish messsage\n0000\n").unwrap();
+                break;
+            }
+            if !line.is_empty() {
+                let mut response = String::new();
+                response = response + line.as_str() + "\n";
+                stream.write_all(response.as_bytes()).unwrap();
+                // 推送消息
+                for x in 1..4 {
+                    thread::sleep(Duration::from_secs(1));
+                    let response = format!("times {}\n", x);
+                    stream.write_all(response.as_bytes()).unwrap();
+                }
+            }
+        } else {
+            println!("Disconnected from server");
+            break;
+        }
     }
+    println!("单线程处理单链接结束");
+
+
     // 结束链接
-    let end = b"0000\n";
-    stream.write_all(end).unwrap();
-    stream.shutdown(Shutdown::Both).unwrap();
+    // let end = b"0000\n";
+    // stream.write_all(end).unwrap();
+    // stream.shutdown(Shutdown::Both).unwrap();
 }

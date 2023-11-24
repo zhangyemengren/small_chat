@@ -1,27 +1,58 @@
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::io::{BufRead, BufReader, stdin, Write};
 use std::thread;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-fn main() {
-    let mut stream = TcpStream::connect("127.0.0.1:8080").unwrap();
-    let stream_fork = stream.try_clone().unwrap();
-    println!("input");
-    thread::spawn(move || {
-        handle_response(stream_fork);
-    });
-    loop {
-        let mut msg = String::new();
-        stdin().read_line(&mut msg).unwrap();
-        send(&mut stream, msg);
+struct Client {
+    stream: TcpStream,
+}
+
+impl Client {
+    fn new<T: AsRef<str>>(url: T) -> Client {
+        let stream = TcpStream::connect(url.as_ref()).unwrap();
+        Client { stream }
+    }
+
+    fn fork(&self) -> Client {
+        let stream = self.stream.try_clone().unwrap();
+        Client { stream }
     }
 }
-fn send(stream: &mut TcpStream, msg: String){
-    // 连接服务器
-    println!("Connected to server");
-    // 向服务器发送消息
+
+fn main() {
+    let run_flag = Arc::new(AtomicBool::new(true));
+
+    loop {
+        let client = Client::new("127.0.0.1:8080");
+        let client_fork = client.fork();
+        let run_clone = run_flag.clone();
+
+        let handle = thread::spawn(move || {
+            handle_response(client_fork, run_clone);
+        });
+
+        while run_flag.load(Ordering::SeqCst) {
+            handle_stdin(&client, run_flag.clone());
+            println!("Sent: {}", run_flag.load(Ordering::SeqCst));
+            handle.
+        }
+
+        handle.join().unwrap();
+        println!("Reconnecting...");
+        run_flag.store(true, Ordering::SeqCst);
+    }
+}
+
+fn handle_stdin(client: &Client, run_flag: Arc<AtomicBool>) {
+    let mut msg = String::new();
+    stdin().read_line(&mut msg).unwrap();
+    let mut stream = &client.stream;
     stream.write_all(msg.as_bytes()).unwrap();
 }
-fn handle_response(stream: TcpStream) {
+
+fn handle_response(client: Client, run_flag: Arc<AtomicBool>) {
+    let stream = client.stream;
     let mut buf_reader = BufReader::new(stream.try_clone().unwrap());
     loop {
         let mut line = String::new();
@@ -39,4 +70,5 @@ fn handle_response(stream: TcpStream) {
         }
     }
     println!("over");
+    run_flag.store(false, Ordering::SeqCst);
 }

@@ -1,4 +1,4 @@
-use std::net::{Shutdown, TcpStream};
+use std::net::{TcpStream};
 use std::io::{BufRead, BufReader, stdin, Write};
 use std::thread;
 use std::sync::Arc;
@@ -24,27 +24,29 @@ fn main() {
     let run_flag = Arc::new(AtomicBool::new(true));
 
     loop {
-        let client = Client::new("127.0.0.1:8080");
-        let client_fork = client.fork();
-        let run_clone = run_flag.clone();
-
-        let handle = thread::spawn(move || {
-            handle_response(client_fork, run_clone);
-        });
-
-        while run_flag.load(Ordering::SeqCst) {
-            handle_stdin(&client, run_flag.clone());
-            println!("Sent: {}", run_flag.load(Ordering::SeqCst));
-            handle.
-        }
-
-        handle.join().unwrap();
-        println!("Reconnecting...");
-        run_flag.store(true, Ordering::SeqCst);
+        handle_client(run_flag.clone());
     }
 }
 
-fn handle_stdin(client: &Client, run_flag: Arc<AtomicBool>) {
+fn handle_client(run_flag: Arc<AtomicBool>) {
+    let client = Client::new("127.0.0.1:8080");
+    let client_fork = client.fork();
+    let run_clone = run_flag.clone();
+
+    let handle = thread::spawn(move || {
+        handle_response(client_fork, run_clone);
+    });
+
+    while run_flag.load(Ordering::SeqCst) {
+        handle_stdin(&client);
+    }
+
+    handle.join().unwrap();
+    println!("Reconnecting...");
+    run_flag.store(true, Ordering::SeqCst);
+}
+
+fn handle_stdin(client: &Client) {
     let mut msg = String::new();
     stdin().read_line(&mut msg).unwrap();
     let mut stream = &client.stream;

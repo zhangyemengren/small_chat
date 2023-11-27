@@ -25,10 +25,11 @@ fn handle_connection(mut stream: TcpStream) {
             }
             if !line.is_empty() {
                 let mut response = String::new();
-                response = response + line.as_str() + "\n";
+                response = response + line.as_str();
                 stream.write_all(response.as_bytes()).unwrap();
+                println!("Request: {}", line);
                 // 推送消息
-                for x in 1..4 {
+                for x in 1..3 {
                     thread::sleep(Duration::from_secs(1));
                     let response = format!("times {}\n", x);
                     stream.write_all(response.as_bytes()).unwrap();

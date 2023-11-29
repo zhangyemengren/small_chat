@@ -1,8 +1,8 @@
-use std::net::{TcpStream};
-use std::io::{BufRead, BufReader, stdin, Write};
-use std::thread;
-use std::sync::Arc;
+use std::io::{stdin, BufRead, BufReader, Write};
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex};
+use std::thread;
 
 struct Client {
     stream: TcpStream,
@@ -20,57 +20,72 @@ impl Client {
     }
 }
 
-fn main() {
-    let run_flag = Arc::new(AtomicBool::new(true));
+static CLIENT: Mutex<Option<Client>> = Mutex::new(None);
+static RUN_FLAG: AtomicBool = AtomicBool::new(true);
 
-    loop {
-        handle_client(run_flag.clone());
-    }
+fn main() {
+    handle_client();
 }
 
-fn handle_client(run_flag: Arc<AtomicBool>) {
-    let client = Client::new("127.0.0.1:8080");
-    let client_fork = client.fork();
-    let run_clone = run_flag.clone();
+fn reconnect() {
+    let mut client = CLIENT.lock().unwrap();
+    *client = Some(Client::new("127.0.0.1:8080"));
+    RUN_FLAG.store(true, Ordering::SeqCst);
+}
 
-    let handle = thread::spawn(move || {
-        handle_response(client_fork, run_clone);
+fn handle_client() {
+    reconnect();
+
+    let _handle = thread::spawn(move || {
+        handle_response();
     });
 
-    while run_flag.load(Ordering::SeqCst) {
-        handle_stdin(&client);
+    loop {
+        handle_stdin();
     }
 
-    handle.join().unwrap();
-    println!("Reconnecting...");
-    run_flag.store(true, Ordering::SeqCst);
 }
 
-fn handle_stdin(client: &Client) {
+fn handle_stdin() {
+    let run_flag = &RUN_FLAG;
     let mut msg = String::new();
     stdin().read_line(&mut msg).unwrap();
-    let mut stream = &client.stream;
+    if !run_flag.load(Ordering::SeqCst) {
+        println!("{} 该条消息应该推入消息队列 重连时直接发送", msg);
+        reconnect();
+        return;
+    }
+    let client = CLIENT.lock().unwrap();
+    let mut stream = &client.as_ref().unwrap().stream;
     stream.write_all(msg.as_bytes()).unwrap();
 }
 
-fn handle_response(client: Client, run_flag: Arc<AtomicBool>) {
-    let stream = client.stream;
-    let mut buf_reader = BufReader::new(stream.try_clone().unwrap());
+fn handle_response() {
+    let run_flag = &RUN_FLAG;
     loop {
-        let mut line = String::new();
-        if let Ok(_) = buf_reader.read_line(&mut line) {
-            if line == "0000\n" {
-                println!("finish message");
+        if !run_flag.load(Ordering::SeqCst) {
+            continue;
+        }
+        let client = CLIENT.lock().unwrap();
+        let stream = &client.as_ref().unwrap().fork().stream;
+        drop(client);
+        let mut buf_reader = BufReader::new(stream.try_clone().unwrap());
+        loop {
+            let mut line = String::new();
+            if let Ok(_) = buf_reader.read_line(&mut line) {
+                if line == "0000\n" {
+                    println!("finish message");
+                    run_flag.store(false, Ordering::SeqCst);
+                    break;
+                }
+                if !line.is_empty() {
+                    println!("Received: {}", line);
+                }
+            } else {
+                println!("Disconnected from server");
+                run_flag.store(false, Ordering::SeqCst);
                 break;
             }
-            if !line.is_empty() {
-                println!("Received: {}", line);
-            }
-        } else {
-            println!("Disconnected from server");
-            break;
         }
     }
-    println!("over");
-    run_flag.store(false, Ordering::SeqCst);
 }

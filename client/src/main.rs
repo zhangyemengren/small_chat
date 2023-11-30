@@ -22,6 +22,7 @@ impl Client {
 
 static CLIENT: Mutex<Option<Client>> = Mutex::new(None);
 static RUN_FLAG: AtomicBool = AtomicBool::new(true);
+static MESSAGE_QUEUE: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn main() {
     handle_client();
@@ -31,6 +32,14 @@ fn reconnect() {
     let mut client = CLIENT.lock().unwrap();
     *client = Some(Client::new("127.0.0.1:8080"));
     RUN_FLAG.store(true, Ordering::SeqCst);
+    let mut msg_queue = MESSAGE_QUEUE.lock().unwrap();
+    if msg_queue.len() > 0 {
+        let mut stream = &client.as_ref().unwrap().stream;
+        for msg in msg_queue.iter() {
+            stream.write_all(msg.as_bytes()).unwrap();
+        }
+        msg_queue.clear();
+    }
 }
 
 fn handle_client() {
@@ -51,7 +60,7 @@ fn handle_stdin() {
     let mut msg = String::new();
     stdin().read_line(&mut msg).unwrap();
     if !run_flag.load(Ordering::SeqCst) {
-        println!("{} 该条消息应该推入消息队列 重连时直接发送", msg);
+        MESSAGE_QUEUE.lock().unwrap().push(msg);
         reconnect();
         return;
     }

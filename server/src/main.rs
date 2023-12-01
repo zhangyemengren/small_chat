@@ -9,7 +9,10 @@ fn main() {
     // 接收并处理每一个请求
     for stream in listener.incoming() {
         let stream = stream.unwrap();
-        handle_connection(stream);
+        thread::spawn(move || {
+            println!("New connection: {}", stream.peer_addr().unwrap());
+            handle_connection(stream);
+        });
     }
 }
 // 处理请求 读取并返回
@@ -40,11 +43,6 @@ fn handle_connection(mut stream: TcpStream) {
             break;
         }
     }
-    println!("单线程处理单链接结束");
-
-
-    // 结束链接
-    // let end = b"0000\n";
-    // stream.write_all(end).unwrap();
-    // stream.shutdown(Shutdown::Both).unwrap();
+    println!("断开连接");
+    stream.shutdown(Shutdown::Both).unwrap();
 }

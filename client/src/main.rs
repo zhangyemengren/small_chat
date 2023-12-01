@@ -1,5 +1,5 @@
 use std::io::{stdin, BufRead, BufReader, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex};
 use std::thread;
@@ -32,6 +32,9 @@ fn reconnect() {
     let mut client = CLIENT.lock().unwrap();
     *client = Some(Client::new("127.0.0.1:8080"));
     RUN_FLAG.store(true, Ordering::SeqCst);
+    thread::spawn(move || {
+        handle_response();
+    });
     let mut msg_queue = MESSAGE_QUEUE.lock().unwrap();
     if msg_queue.len() > 0 {
         let mut stream = &client.as_ref().unwrap().stream;
@@ -45,10 +48,6 @@ fn reconnect() {
 fn handle_client() {
     reconnect();
 
-    let _handle = thread::spawn(move || {
-        handle_response();
-    });
-
     loop {
         handle_stdin();
     }
@@ -61,6 +60,7 @@ fn handle_stdin() {
     stdin().read_line(&mut msg).unwrap();
     if !run_flag.load(Ordering::SeqCst) {
         MESSAGE_QUEUE.lock().unwrap().push(msg);
+
         reconnect();
         return;
     }
@@ -73,7 +73,7 @@ fn handle_response() {
     let run_flag = &RUN_FLAG;
     loop {
         if !run_flag.load(Ordering::SeqCst) {
-            continue;
+            break;
         }
         let client = CLIENT.lock().unwrap();
         let stream = &client.as_ref().unwrap().fork().stream;
@@ -84,7 +84,6 @@ fn handle_response() {
             if let Ok(_) = buf_reader.read_line(&mut line) {
                 if line == "0000\n" {
                     println!("finish message");
-                    run_flag.store(false, Ordering::SeqCst);
                     break;
                 }
                 if !line.is_empty() {
@@ -92,9 +91,9 @@ fn handle_response() {
                 }
             } else {
                 println!("Disconnected from server");
-                run_flag.store(false, Ordering::SeqCst);
                 break;
             }
         }
+        run_flag.store(false, Ordering::SeqCst);
     }
 }

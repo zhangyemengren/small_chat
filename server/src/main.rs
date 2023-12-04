@@ -3,10 +3,11 @@ use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::{JoinHandle, ThreadId};
-use std::time::Duration;
+// use std::time::Duration;
 
 const MAX_CONNECT: usize = 2;
 
+#[derive(Debug)]
 struct User {
     id: ThreadId,
     stream: TcpStream,
@@ -40,11 +41,12 @@ fn main() {
             };
             let mut users = users_clone.lock().unwrap();
             users.push(user);
-            let users_clone = users_clone.clone();
             drop(users);
-            handle_connection(users_clone);
+            handle_connection(users_clone.clone());
             let mut pool = pool_clone.lock().unwrap();
             pool.retain(|x| x.thread().id() != thread::current().id());
+            let mut users = users_clone.lock().unwrap();
+            users.retain(|x| x.id != thread::current().id());
         });
 
         pool.push(handle);
@@ -52,12 +54,17 @@ fn main() {
 }
 // 处理请求 读取并返回
 fn handle_connection(users: Arc<Mutex<Vec<User>>>) {
-    let users = users.lock().unwrap();
-    let user = users.iter().find(|x| x.id == thread::current().id());
-    println!("id: {:?}",user.unwrap().id);
-    let mut stream = user.unwrap().stream.try_clone().unwrap();
+    let users_guard = users.lock().unwrap();
+    let user = users_guard
+        .iter()
+        .find(|x| x.id == thread::current().id())
+        .unwrap();
+    let user_name = user.name.clone();
+    // println!("user: {:?} others: {:?}",user, others);
+    // println!("users: {:?} id:{:?}", users, thread::current().id());
+    let mut stream = user.stream.try_clone().unwrap();
     let mut buf_reader = BufReader::new(stream.try_clone().unwrap());
-    drop(users);
+    drop(users_guard);
     loop {
         let mut line = String::new();
         if let Ok(_) = buf_reader.read_line(&mut line) {
@@ -68,14 +75,24 @@ fn handle_connection(users: Arc<Mutex<Vec<User>>>) {
             if !line.is_empty() {
                 let mut response = String::new();
                 response = response + line.as_str();
-                stream.write_all(response.as_bytes()).unwrap();
                 println!("Request: {}", line);
                 // 推送消息
-                for x in 1..3 {
-                    thread::sleep(Duration::from_secs(1));
-                    let response = format!("times {}\n", x);
-                    stream.write_all(response.as_bytes()).unwrap();
-                }
+                stream.write_all(response.as_bytes()).unwrap();
+                let users = users.lock().unwrap();
+                let others_streams = users
+                    .iter()
+                    .filter(|x| x.id != thread::current().id())
+                    .map(|x| x.stream.try_clone().unwrap())
+                    .collect::<Vec<TcpStream>>();
+                others_streams.iter().for_each(|mut s| {
+                    let msg = format!("{}: {}", user_name, line);
+                    s.write_all(msg.as_bytes()).unwrap();
+                });
+                // for x in 1..3 {
+                //     thread::sleep(Duration::from_secs(1));
+                //     let response = format!("times {}\n", x);
+                //     stream.write_all(response.as_bytes()).unwrap();
+                // }
             }
         } else {
             println!("Disconnected from server");

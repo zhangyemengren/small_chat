@@ -17,7 +17,6 @@ struct User {
 fn main() {
     // 监听
     let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
-    // 使用arc + mutex 代替全局变量
     let pool: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
     let users: Arc<Mutex<Vec<User>>> = Arc::new(Mutex::new(Vec::new()));
     // 接收并处理每一个请求

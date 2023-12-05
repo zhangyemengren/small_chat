@@ -80,7 +80,7 @@ fn handle_connection(users: Arc<Mutex<Vec<User>>>) {
                     stream.write_all(b"End messsage\n0000\n").unwrap();
                     break;
                 }
-                if line == "\u{1F493}\n"{
+                if line == "\u{1F493}\n" {
                     println!("Heartbeat\u{1F493} from {}", user_name);
                     continue;
                 }
@@ -91,15 +91,14 @@ fn handle_connection(users: Arc<Mutex<Vec<User>>>) {
                     // 推送消息
                     stream.write_all(response.as_bytes()).unwrap();
                     let users = users.lock().unwrap();
-                    let others_streams = users
+                    users
                         .iter()
                         .filter(|x| x.id != thread::current().id())
                         .map(|x| x.stream.try_clone().unwrap())
-                        .collect::<Vec<TcpStream>>();
-                    others_streams.iter().for_each(|mut s| {
-                        let msg = format!("{}: {}", user_name, line);
-                        s.write_all(msg.as_bytes()).unwrap();
-                    });
+                        .for_each(|mut s| {
+                            let msg = format!("{}: {}", user_name, line);
+                            s.write_all(msg.as_bytes()).unwrap();
+                        });
                 }
             }
             Err(e) => {

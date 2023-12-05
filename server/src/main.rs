@@ -104,7 +104,7 @@ fn handle_connection(users: Arc<Mutex<Vec<User>>>) {
             }
             Err(e) => {
                 if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut {
-                    // 超时：3秒内没有收到数据
+                    // 超时：SHUTDOWN_INTERVAL秒内没有收到数据
                     println!("Timed out due to inactivity");
                     break;
                 } else {

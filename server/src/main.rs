@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -6,6 +6,7 @@ use std::thread::{JoinHandle, ThreadId};
 // use std::time::Duration;
 
 const MAX_CONNECT: usize = 2;
+const SHUTDOWN_INTERVAL: u64 = 10;
 
 #[derive(Debug)]
 struct User {
@@ -22,11 +23,14 @@ fn main() {
     // 接收并处理每一个请求
     for stream in listener.incoming() {
         let stream = stream.unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(SHUTDOWN_INTERVAL)))
+            .unwrap();
         let pool_clone = pool.clone();
         let users_clone = users.clone();
         let mut pool = pool.lock().unwrap();
         if pool.len() >= MAX_CONNECT {
-            println!("连接数过多");
+            println!("Too many connections");
             continue;
         }
 
@@ -59,45 +63,58 @@ fn handle_connection(users: Arc<Mutex<Vec<User>>>) {
         .find(|x| x.id == thread::current().id())
         .unwrap();
     let user_name = user.name.clone();
-    // println!("user: {:?} others: {:?}",user, others);
-    // println!("users: {:?} id:{:?}", users, thread::current().id());
+
     let mut stream = user.stream.try_clone().unwrap();
     let mut buf_reader = BufReader::new(stream.try_clone().unwrap());
     drop(users_guard);
     loop {
         let mut line = String::new();
-        if let Ok(_) = buf_reader.read_line(&mut line) {
-            if line == "0000\n" {
-                stream.write_all(b"finish messsage\n0000\n").unwrap();
+        match buf_reader.read_line(&mut line) {
+            Ok(0) => {
+                // 流结束，客户端关闭了连接
+                println!("Client disconnected");
                 break;
             }
-            if !line.is_empty() {
-                let mut response = String::new();
-                response = response + line.as_str();
-                println!("Request: {}", line);
-                // 推送消息
-                stream.write_all(response.as_bytes()).unwrap();
-                let users = users.lock().unwrap();
-                let others_streams = users
-                    .iter()
-                    .filter(|x| x.id != thread::current().id())
-                    .map(|x| x.stream.try_clone().unwrap())
-                    .collect::<Vec<TcpStream>>();
-                others_streams.iter().for_each(|mut s| {
-                    let msg = format!("{}: {}", user_name, line);
-                    s.write_all(msg.as_bytes()).unwrap();
-                });
-                // for x in 1..3 {
-                //     thread::sleep(Duration::from_secs(1));
-                //     let response = format!("times {}\n", x);
-                //     stream.write_all(response.as_bytes()).unwrap();
-                // }
+            Ok(_) => {
+                if line == "0000\n" {
+                    stream.write_all(b"End messsage\n0000\n").unwrap();
+                    break;
+                }
+                if line == "\u{1F493}\n"{
+                    println!("Heartbeat\u{1F493} from {}", user_name);
+                    continue;
+                }
+                if !line.is_empty() {
+                    let mut response = String::new();
+                    response = response + line.as_str();
+                    println!("Request: {} from {}", line, user_name);
+                    // 推送消息
+                    stream.write_all(response.as_bytes()).unwrap();
+                    let users = users.lock().unwrap();
+                    let others_streams = users
+                        .iter()
+                        .filter(|x| x.id != thread::current().id())
+                        .map(|x| x.stream.try_clone().unwrap())
+                        .collect::<Vec<TcpStream>>();
+                    others_streams.iter().for_each(|mut s| {
+                        let msg = format!("{}: {}", user_name, line);
+                        s.write_all(msg.as_bytes()).unwrap();
+                    });
+                }
             }
-        } else {
-            println!("Disconnected from server");
-            break;
+            Err(e) => {
+                if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut {
+                    // 超时：3秒内没有收到数据
+                    println!("Timed out due to inactivity");
+                    break;
+                } else {
+                    // 其他错误
+                    println!("Error occurred: {}", e);
+                    break;
+                }
+            }
         }
     }
-    println!("断开连接");
+    println!("Disconnect loop end");
     stream.shutdown(Shutdown::Both).unwrap();
 }
